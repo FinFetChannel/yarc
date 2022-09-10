@@ -1,4 +1,4 @@
-# YARC - Yeat Another Ray Caster
+# YARC - Yet Another Ray Caster
 Python PyGame raycasting demo for the web with pygbag
 
 Install pygbag: `pip install pygbag`
