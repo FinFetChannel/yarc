@@ -1,16 +1,20 @@
 import asyncio
 import pygame as pg
 import math
-
-pg.init()
-screen = pg.display.set_mode((800,600))
-clock = pg.time.Clock()
-font = pg.font.SysFont("Arial", 20, 1)
-pg.mouse.set_visible(False)
+import random
 
 async def main():
+    pg.init()
+    horizontal_res = 192*4
+    vertical_res = 108*4
+    fov = 60
+    mod = fov/horizontal_res
+    step = 0.005
+    screen = pg.display.set_mode((horizontal_res,vertical_res))#, pg.SCALED)
+    clock = pg.time.Clock()
+    font = pg.font.SysFont("Arial", 20, 1)
+    pg.mouse.set_visible(False)
     running = 1
-    size = 6
     mapa = [[1, 1, 1, 1, 1, 1],
             [1, 0, 0, 0, 0, 1],
             [1, 0, 1, 0, 1, 1],
@@ -18,51 +22,39 @@ async def main():
             [1, 0, 0, 0, 0, 1],
             [1, 1, 1, 1, 1, 1]]
     posx = posy = rot = 1.5
-    horizontal_res = 200
-    vertical_res = int(horizontal_res*0.75)
+    
     frame = pg.Surface([horizontal_res, vertical_res])
-    mod = 60/horizontal_res
+    
     pg.event.set_grab(1)
     wall = pg.image.load('wall.jpg').convert()
     sky = pg.transform.smoothscale(pg.image.load('skybox.jpg').convert(), (12*horizontal_res, vertical_res))
-    
 
     while True:
         elapsed_time = clock.tick()/1000
         posx, posy, rot = movement(posx, posy, rot, mapa, 2*elapsed_time)
 
         fps = str(round(clock.get_fps(),1))
-        # frame.fill([0,0,0])
-        frame.blit(sky, (-math.degrees(rot%(2*math.pi)*horizontal_res/60), 0))
+        frame.blit(sky, (-math.degrees(rot%(2*math.pi)*horizontal_res/fov), 0))
         for event in pg.event.get():
             if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
                 running = 0
 
         for i in range(horizontal_res): #vision loop
-            rot_i = rot + math.radians(i*mod - 30)
-            x, y = (posx, posy)
-            sin, cos = (0.02*math.sin(rot_i), 0.02*math.cos(rot_i))
-            n = 0
-            while True: # ray loop
-                x, y = (x + cos, y + sin)
-                n = n+1
-                if mapa[int(x)][int(y)] != 0:
-                    h = vertical_res*(1/(0.02 * n*math.cos(math.radians(i*mod-30))))
-                    xx = x%1
-                    if xx < 0.05 or xx > 0.95:
-                        xx = y%1
-                    resized = pg.transform.scale(wall, (h,h))
-                    subsurface = pg.Surface.subsurface(resized, (min(int(h)-1, int(xx*h)), 0, 1, int(h)))
-                    frame.blit(subsurface, (i, (vertical_res-h)*0.5))
-                    break 
+            rot_i = rot + math.radians(i*mod - fov*0.5)
+            x, y, dist = lodev(posx, posy, rot_i, mapa)
+            
+            scale = vertical_res*(min(4, (1/(dist*math.cos(math.radians(i*mod-fov*0.5))))))
+            text_coord = x%1
+            if text_coord < 0.05 or text_coord > 0.95:
+                text_coord = y%1
 
-        upscaled = pg.transform.scale(frame, [800,600])
+            subsurface = pg.Surface.subsurface(wall, (int(100*text_coord), 0, 1, 99))
+            resized = pg.transform.scale(subsurface, (1,scale))
+            frame.blit(resized, (i, (vertical_res-scale)*0.5))
+
+        screen.blit(frame, (0,0))
+        screen.blit(font.render(fps, 1, [255, 255, 255]), [0,0])
         
-        upscaled.blit(font.render(fps, 1, [255, 255, 255]), [0,0])
-        screen.blit(upscaled, (0,0))
-
-        
-
         pg.display.update()
 
         await asyncio.sleep(0)  # very important, and keep it 0
@@ -74,7 +66,8 @@ def movement(posx, posy, rot, mapa, elapsed_time):
     
     if pg.mouse.get_focused():
         p_mouse = pg.mouse.get_rel()
-        rot = rot + min(max((p_mouse[0])/200, -0.2), .2)
+        if abs(p_mouse[0]) > 1:
+            rot = rot + min(max((p_mouse[0])/200, -0.2), .2)
     
     pressed_keys = pg.key.get_pressed()
     x, y = posx, posy
@@ -105,6 +98,54 @@ def movement(posx, posy, rot, mapa, elapsed_time):
         return x, posy, rot
     else:
         return posx, posy, rot
+
+def lodev(x, y, rot_i, mapa):
+    size = len(mapa)
+    sin, cos = math.sin(rot_i), math.cos(rot_i)
+    norm = math.sqrt(cos**2 + sin**2)
+    rayDirX, rayDirY = cos/norm + 1e-16, sin/norm + 1e-16
+    
+    mapX, mapY = int(x), int(y)
+
+    deltaDistX, deltaDistY = abs(1/rayDirX), abs(1/rayDirY)
+
+    if rayDirX < 0:
+        stepX, sideDistX = -1, (x - mapX) * deltaDistX
+    else:
+        stepX, sideDistX = 1, (mapX + 1.0 - x) * deltaDistX
+        
+    if rayDirY < 0:
+        stepY, sideDistY = -1, (y - mapY) * deltaDistY
+    else:
+        stepY, sideDistY = 1, (mapY + 1 - y) * deltaDistY
+
+    while 1:
+        if (sideDistX < sideDistY):
+            sideDistX += deltaDistX
+            mapX += stepX
+            dist = sideDistX
+            side = 0
+            if mapX < 1 or mapX > size-1:
+                break
+        else:
+            sideDistY += deltaDistY
+            mapY += stepY
+            dist = sideDistY
+            side = 1
+            if mapY < 1 or mapY > size-1:
+                break
+        if mapa[mapX][mapY] != 0:
+            break
+            
+    if side:
+        dist = dist - deltaDistY
+    else:
+        dist = dist - deltaDistX
+        
+    x = x + rayDirX*dist - 0.001*cos
+    y = y + rayDirY*dist - 0.001*sin
+    
+    return x, y, dist
 
 asyncio.run( main() )
 
