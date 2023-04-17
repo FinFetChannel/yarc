@@ -32,12 +32,13 @@ async def main():
     robot = pg.image.load('robot.png').convert()
     robot.set_colorkey((255,255,255))
     robot_pos = [4.5,4.5]
-    old_size = robot.get_size()
     
+    total_time = 0
     running = 1
     while running:
-        elapsed_time = clock.tick()/1000
-        fps = str(round(clock.get_fps(),1))
+        elapsed_time = clock.tick(60)*0.001
+        total_time += elapsed_time
+        fps = int(clock.get_fps()) 
 
         x_pos, y_pos, rot, rot_v = movement(x_pos, y_pos, rot, rot_v, mapa, 2*elapsed_time)
         offset = rot_v*vertical_res
@@ -63,7 +64,7 @@ async def main():
         
         draw_sprite(screen, x_pos, y_pos, rot, fov, mapa, robot_pos, robot, offset)
         
-        screen.blit(font.render(fps, 1, [255, 255, 255]), [0,0])
+        screen.blit(font.render(str(fps), 1, [255, 255, 255]), [5,5])
         
         pg.display.update()
 
@@ -164,21 +165,21 @@ def lodev_DDA(x, y, rot_i, mapa):
 
 def draw_sprite(screen, x_pos, y_pos, rot, fov, mapa, sprite_pos, sprite, offset):
     horizontal_res, vertical_res = screen.get_size()
+    screen_scale = vertical_res*0.003
     old_size = sprite.get_size()
     dist2player = math.sqrt((x_pos-sprite_pos[0])**2+(y_pos-sprite_pos[1])**2)
     angle = math.atan2(sprite_pos[1]-y_pos, sprite_pos[0]-x_pos) # absolute angle
     if abs(sprite_pos[1]-y_pos) + math.sin(angle) < abs(sprite_pos[1]-y_pos):
-        angle -= math.pi
+        angle -= math.pi # wrong direction
     angle2 = (rot-angle)%(2*math.pi) # relative angle
     angle2degree = math.degrees(angle2)
     if angle2degree > 180:
         angle2degree = angle2degree - 360
     if angle2degree > -fov/2 and angle2degree < fov/2:
         x, y, dist = lodev_DDA(x_pos, y_pos, angle, mapa)
-        print(dist, dist2player)
         if dist2player-0.2 < dist:
             scale =  min(4, 1/(dist2player*math.cos(angle2)))
-            new_size = scale*old_size[0], scale*old_size[1]
+            new_size = screen_scale*old_size[0]*scale, screen_scale*old_size[1]*scale
             hor_coord = (fov*0.5-angle2degree)*horizontal_res/fov - new_size[0]*0.5
             ground_coord = (vertical_res+scale*vertical_res)*0.5 + offset
             scaled_sprite = pg.transform.scale(sprite, new_size)
