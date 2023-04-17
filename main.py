@@ -6,11 +6,11 @@ import random
 async def main():
     pg.init()
     screen_scale = 3.7
-    horizontal_res = int(192*screen_scale)
-    vertical_res = int(108*screen_scale)
+    screen_size = [int(192*screen_scale), int(108*screen_scale)]
     fov = 75
-    mod = fov/horizontal_res
-    screen = pg.display.set_mode((horizontal_res,vertical_res), pg.SCALED)
+    mod = fov/screen_size[0]
+    screen = pg.display.set_mode(screen_size, pg.SCALED)
+    
     clock = pg.time.Clock()
     font = pg.font.SysFont(None, 20, 1)
 
@@ -28,40 +28,33 @@ async def main():
     
     pg.event.set_grab(1)
     wall = pg.image.load('wall.jpg').convert()
-    sky = pg.transform.smoothscale(pg.image.load('skybox.jpg').convert(), (12*horizontal_res*60/fov, 3*vertical_res))
-    robot = pg.image.load('robot.png').convert()
-    robot.set_colorkey((255,255,255))
-    robot_pos = [4.5,4.5]
+    sky = pg.transform.smoothscale(pg.image.load('skybox.jpg').convert(), (12*screen_size[0]*60/fov, 3*screen_size[1]))
+    robot_sheet = pg.image.load('robot.png').convert()
+    robot_sheet.set_colorkey((255,255,255))
+    robot = []
+    for i in range(4):
+        robot.append(pg.Surface.subsurface(robot_sheet, [i*100, 0, 100, 200]))
+    robot_pos = [2.54, 1.5, 0] # x, y, dir
     
     total_time = 0
     running = 1
     while running:
-        elapsed_time = clock.tick(60)*0.001
-        total_time += elapsed_time
-        fps = int(clock.get_fps()) 
-
-        x_pos, y_pos, rot, rot_v = movement(x_pos, y_pos, rot, rot_v, mapa, 2*elapsed_time)
-        offset = rot_v*vertical_res
-        sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*horizontal_res/fov), vertical_res-offset, horizontal_res, vertical_res))
-        screen.blit(sub_sky, (0, 0))
 
         for event in pg.event.get():
             if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
                 running = 0
-        
-        for i in range(horizontal_res): #vision loop
-            rot_i = rot + math.radians(i*mod - fov*0.5)
-            x, y, dist = lodev_DDA(x_pos, y_pos, rot_i, mapa)
-            
-            scale = vertical_res*(min(4, (1/(dist*math.cos(math.radians(i*mod-fov*0.5))))))
-            text_coord = x%1
-            if text_coord < 0.05 or text_coord > 0.95:
-                text_coord = y%1
 
-            subsurface = pg.Surface.subsurface(wall, (int(100*text_coord), 0, 1, 99))
-            resized = pg.transform.scale(subsurface, (1,scale))
-            screen.blit(resized, (i, (vertical_res-scale)*0.5+offset))
-        
+        elapsed_time = clock.tick()*0.001
+        total_time += elapsed_time
+        fps = int(clock.get_fps()) 
+
+        x_pos, y_pos, rot, rot_v = movement(x_pos, y_pos, rot, rot_v, mapa, 2*elapsed_time)
+        robot_pos = move_sprite(robot_pos, 0.5, mapa, elapsed_time)
+
+        offset = rot_v*screen_size[1]
+        sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*screen_size[0]/fov), screen_size[1]-offset, screen_size[0], screen_size[1]))
+        screen.blit(sub_sky, (0, 0))
+        raycast_walls(screen, mod, fov, mapa, x_pos, y_pos, rot, offset, wall)
         draw_sprite(screen, x_pos, y_pos, rot, fov, mapa, robot_pos, robot, offset)
         
         screen.blit(font.render(str(fps), 1, [255, 255, 255]), [5,5])
@@ -83,6 +76,7 @@ def movement(x_pos, y_pos, rot, rot_v, mapa, elapsed_time):
             rot_v = rot_v - min(max((p_mouse[1])/200, -0.2), .2)
             rot_v = min(1, max(-1, rot_v))
     
+    size = len(mapa)
     pressed_keys = pg.key.get_pressed()
     x, y = x_pos, y_pos
     
@@ -94,6 +88,9 @@ def movement(x_pos, y_pos, rot, rot_v, mapa, elapsed_time):
 
     x += elapsed_time*(forward*math.cos(rot) + sideways*math.sin(rot))
     y += elapsed_time*(forward*math.sin(rot) - sideways*math.cos(rot))
+
+    x = max(0, min(size-1, x))
+    y = max(0, min(size-1, y))
 
     if (mapa[int(x-0.3)][int(y-0.3)] == 0 
         and mapa[int(x+0.3)][int(y+0.3)] == 0 
@@ -113,10 +110,22 @@ def movement(x_pos, y_pos, rot, rot_v, mapa, elapsed_time):
     
     return x_pos, y_pos, rot, rot_v
 
+def move_sprite(position, velocity, mapa, elapsed_time):
+    size = len(mapa)
+    x = position[0] + elapsed_time*math.cos(position[2])*velocity
+    y = position[1] + elapsed_time*math.sin(position[2])*velocity
+
+    if x > 0 and y > 0 and x < size -1 and y < size-1 and mapa[int(x)][int(y)] == 0:
+        return [x, y, position[2]]
+    else:
+        direction = random.uniform(0, 2*math.pi)
+        return [position[0], position[1], direction]
+
 ### Digital Differential Analysis Algorithm by Lode V., source:
 ### https://lodev.org/cgtutor/raycasting.html
 def lodev_DDA(x, y, rot_i, mapa):
     size = len(mapa)
+    no_wall = True
     sin, cos = math.sin(rot_i), math.cos(rot_i)
     norm = math.sqrt(cos**2 + sin**2)
     rayDirX, rayDirY = cos/norm + 1e-16, sin/norm + 1e-16
@@ -141,16 +150,17 @@ def lodev_DDA(x, y, rot_i, mapa):
             mapX += stepX
             dist = sideDistX
             side = 0
-            if mapX < 1 or mapX > size-1:
+            if mapX < 0 or mapX > size-1:
                 break
         else:
             sideDistY += deltaDistY
             mapY += stepY
             dist = sideDistY
             side = 1
-            if mapY < 1 or mapY > size-1:
+            if mapY < 0 or mapY > size-1:
                 break
         if mapa[mapX][mapY] != 0:
+            no_wall = False
             break
             
     if side:
@@ -161,29 +171,45 @@ def lodev_DDA(x, y, rot_i, mapa):
     x = x + rayDirX*dist - 0.0001*cos
     y = y + rayDirY*dist - 0.0001*sin
     
-    return x, y, dist
+    return x, y, dist, no_wall
+
+def raycast_walls(screen, mod, fov, mapa, x_pos, y_pos, rot, offset, wall):
+    horizontal_res, vertical_res = screen.get_size()
+    for i in range(horizontal_res): #vision loop
+        rot_i = rot + math.radians(i*mod - fov*0.5)
+        x, y, dist, no_wall = lodev_DDA(x_pos, y_pos, rot_i, mapa)
+        
+        if not no_wall:
+            scale = vertical_res*(min(4, (1/(dist*math.cos(math.radians(i*mod-fov*0.5))))))
+            text_coord = x%1
+            if text_coord < 0.05 or text_coord > 0.95:
+                text_coord = y%1
+
+            subsurface = pg.Surface.subsurface(wall, (int(100*text_coord), 0, 1, 99))
+            resized = pg.transform.scale(subsurface, (1,scale))
+            screen.blit(resized, (i, (vertical_res-scale)*0.5+offset))
 
 def draw_sprite(screen, x_pos, y_pos, rot, fov, mapa, sprite_pos, sprite, offset):
     horizontal_res, vertical_res = screen.get_size()
     screen_scale = vertical_res*0.003
-    old_size = sprite.get_size()
+    old_size = sprite[0].get_size()
     dist2player = math.sqrt((x_pos-sprite_pos[0])**2+(y_pos-sprite_pos[1])**2)
     angle = math.atan2(sprite_pos[1]-y_pos, sprite_pos[0]-x_pos) # absolute angle
-    if abs(sprite_pos[1]-y_pos) + math.sin(angle) < abs(sprite_pos[1]-y_pos):
+    if abs(sprite_pos[1]-y_pos + math.sin(angle)) < abs(sprite_pos[1]-y_pos):
         angle -= math.pi # wrong direction
     angle2 = (rot-angle)%(2*math.pi) # relative angle
     angle2degree = math.degrees(angle2)
     if angle2degree > 180:
         angle2degree = angle2degree - 360
     if angle2degree > -fov/2 and angle2degree < fov/2:
-        x, y, dist = lodev_DDA(x_pos, y_pos, angle, mapa)
+        x, y, dist, no_wall = lodev_DDA(x_pos, y_pos, angle, mapa)
         if dist2player-0.2 < dist:
             scale =  min(4, 1/(dist2player*math.cos(angle2)))
             new_size = screen_scale*old_size[0]*scale, screen_scale*old_size[1]*scale
             hor_coord = (fov*0.5-angle2degree)*horizontal_res/fov - new_size[0]*0.5
             ground_coord = (vertical_res+scale*vertical_res)*0.5 + offset
-            scaled_sprite = pg.transform.scale(sprite, new_size)
-            
+            facing_angle = int(((sprite_pos[2] - angle -3*math.pi/4)%(2*math.pi))/(math.pi/2))
+            scaled_sprite = pg.transform.scale(sprite[facing_angle], new_size)
             screen.blit(scaled_sprite, (hor_coord, ground_coord - new_size[1]))   
 
 if __name__ == '__main__':
