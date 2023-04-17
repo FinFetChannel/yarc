@@ -7,41 +7,45 @@ async def main():
     pg.init()
     horizontal_res = 192*4
     vertical_res = 108*4
-    fov = 60
+    fov = 75
     mod = fov/horizontal_res
-    step = 0.005
     screen = pg.display.set_mode((horizontal_res,vertical_res))#, pg.SCALED)
     clock = pg.time.Clock()
-    font = pg.font.SysFont("Arial", 20, 1)
+    font = pg.font.SysFont(None, 20, 1)
+
     pg.mouse.set_visible(False)
-    running = 1
+    
     mapa = [[1, 1, 1, 1, 1, 1],
             [1, 0, 0, 0, 0, 1],
             [1, 0, 1, 0, 1, 1],
             [1, 0, 1, 0, 1, 1],
             [1, 0, 0, 0, 0, 1],
             [1, 1, 1, 1, 1, 1]]
-    posx = posy = rot = 1.5
     
-    frame = pg.Surface([horizontal_res, vertical_res])
+    posx = posy = 1.5
+    rot = rot_v = 0
     
     pg.event.set_grab(1)
     wall = pg.image.load('wall.jpg').convert()
-    sky = pg.transform.smoothscale(pg.image.load('skybox.jpg').convert(), (12*horizontal_res, vertical_res))
-
-    while True:
+    sky = pg.transform.smoothscale(pg.image.load('skybox.jpg').convert(), (12*horizontal_res*60/fov, 3*vertical_res))
+    
+    running = 1
+    while running:
         elapsed_time = clock.tick()/1000
-        posx, posy, rot = movement(posx, posy, rot, mapa, 2*elapsed_time)
-
         fps = str(round(clock.get_fps(),1))
-        frame.blit(sky, (-math.degrees(rot%(2*math.pi)*horizontal_res/fov), 0))
+
+        posx, posy, rot, rot_v = movement(posx, posy, rot, rot_v, mapa, 2*elapsed_time)
+        offset = rot_v*vertical_res
+        sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*horizontal_res/fov), vertical_res-offset, horizontal_res, vertical_res))
+        screen.blit(sub_sky, (0, 0))
+
         for event in pg.event.get():
             if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
                 running = 0
-
+        
         for i in range(horizontal_res): #vision loop
             rot_i = rot + math.radians(i*mod - fov*0.5)
-            x, y, dist = lodev(posx, posy, rot_i, mapa)
+            x, y, dist = lodev_DDA(posx, posy, rot_i, mapa)
             
             scale = vertical_res*(min(4, (1/(dist*math.cos(math.radians(i*mod-fov*0.5))))))
             text_coord = x%1
@@ -50,9 +54,8 @@ async def main():
 
             subsurface = pg.Surface.subsurface(wall, (int(100*text_coord), 0, 1, 99))
             resized = pg.transform.scale(subsurface, (1,scale))
-            frame.blit(resized, (i, (vertical_res-scale)*0.5))
+            screen.blit(resized, (i, (vertical_res-scale)*0.5+offset))
 
-        screen.blit(frame, (0,0))
         screen.blit(font.render(fps, 1, [255, 255, 255]), [0,0])
         
         pg.display.update()
@@ -62,12 +65,15 @@ async def main():
             pg.quit()
             return
 
-def movement(posx, posy, rot, mapa, elapsed_time):
+def movement(posx, posy, rot, rot_v, mapa, elapsed_time):
     
     if pg.mouse.get_focused():
         p_mouse = pg.mouse.get_rel()
         if abs(p_mouse[0]) > 1:
             rot = rot + min(max((p_mouse[0])/200, -0.2), .2)
+        if abs(p_mouse[1]) > 1:
+            rot_v = rot_v - min(max((p_mouse[1])/200, -0.2), .2)
+            rot_v = min(1, max(-1, rot_v))
     
     pressed_keys = pg.key.get_pressed()
     x, y = posx, posy
@@ -85,21 +91,23 @@ def movement(posx, posy, rot, mapa, elapsed_time):
         and mapa[int(x+0.3)][int(y+0.3)] == 0 
         and mapa[int(x+0.3)][int(y-0.3)] == 0 
         and mapa[int(x-0.3)][int(y+0.3)] == 0):
-        return x, y, rot
+        return x, y, rot, rot_v
     elif (mapa[int(posx-0.3)][int(y-0.3)] == 0 
         and mapa[int(posx+0.3)][int(y+0.3)] == 0 
         and mapa[int(posx+0.3)][int(y-0.3)] == 0 
         and mapa[int(posx-0.3)][int(y+0.3)] == 0):
-        return posx, y, rot
+        return posx, y, rot, rot_v
     elif (mapa[int(x-0.3)][int(posy-0.3)] == 0 
         and mapa[int(x+0.3)][int(posy+0.3)] == 0 
         and mapa[int(x+0.3)][int(posy-0.3)] == 0 
         and mapa[int(x-0.3)][int(posy+0.3)] == 0):
-        return x, posy, rot
-    else:
-        return posx, posy, rot
+        return x, posy, rot, rot_v
+    
+    return posx, posy, rot, rot_v
 
-def lodev(x, y, rot_i, mapa):
+### Digital Differential Analysis Algorithm by Lode V., source:
+### https://lodev.org/cgtutor/raycasting.html
+def lodev_DDA(x, y, rot_i, mapa):
     size = len(mapa)
     sin, cos = math.sin(rot_i), math.cos(rot_i)
     norm = math.sqrt(cos**2 + sin**2)
