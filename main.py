@@ -1,12 +1,14 @@
 import asyncio
 import pygame as pg
+import pygame.surfarray
 import math
 import random
+import numpy as np
 
 async def main():
     pg.init()
-    screen_scale = 3.7
-    screen_size = [int(192*screen_scale), int(108*screen_scale)]
+    screen_scale = 2
+    screen_size = [int(192*screen_scale), 4*int(27*screen_scale)]
     fov = 75
     mod = fov/screen_size[0]
     screen = pg.display.set_mode(screen_size, pg.SCALED)
@@ -28,12 +30,15 @@ async def main():
     
     pg.event.set_grab(1)
     wall = pg.image.load('wall.jpg').convert()
+    floor = pg.surfarray.array3d(pg.image.load('floor.jpg'))
     sky = pg.transform.smoothscale(pg.image.load('skybox.png').convert(), (12*screen_size[0]*60/fov, 3*screen_size[1]))
+
     floor_points = []
     subpoints = 3
     for i in range(subpoints*len(mapa)-subpoints):
         for j in range(subpoints*len(mapa)-subpoints):
-            position = [i/subpoints+0.5, j/subpoints+0.5]
+            # position = [i/subpoints+0.5, j/subpoints+0.5]
+            position = [random.uniform(1, len(mapa)-1), random.uniform(1, len(mapa)-1)]
             if mapa[int(position[0])][int(position[1])] == 0:
                 floor_points.append(position)
 
@@ -43,7 +48,12 @@ async def main():
     for i in range(4):
         robot.append(pg.Surface.subsurface(robot_sheet, [i*100, 0, 100, 200]))
     robot_pos = [2.54, 1.5, 0] # x, y, dir
+
+    hres = int(screen_size[0]/2)
+    halfvres = int(screen_size[1]/4)
+    frame = np.zeros([hres, halfvres*2, 3])
     
+    graphics_low = 0
     indoor = 0
     bullet_time = 0
     total_time = 0
@@ -69,16 +79,33 @@ async def main():
         robot_pos = move_sprite(robot_pos, 0.5, mapa, elapsed_time)
 
         offset = rot_v*screen_size[1]
-        if indoor:
-            screen.fill((70,70,79))
-            pg.draw.rect(screen, (230,230,200), [0,0,screen_size[0], screen_size[1]/2+offset])
-        else:
-            sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*screen_size[0]/fov), screen_size[1]-offset, screen_size[0], screen_size[1]))
-            screen.blit(sub_sky, (0, 0))
         
-        for i in range(len(floor_points)):
-            draw_points(screen, x_pos, y_pos, rot, fov, floor_points[i], offset, indoor)
+        if graphics_low:
+            if indoor:
+                screen.fill((70,70,79))
+                pg.draw.rect(screen, (230,230,200), [0,0,screen_size[0], screen_size[1]/2+offset])
+            else:
+                sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*screen_size[0]/fov), screen_size[1]-offset, screen_size[0], screen_size[1]))
+                screen.blit(sub_sky, (0, 0))
+            
+            for i in range(len(floor_points)):
+                draw_points(screen, x_pos, y_pos, rot, fov, floor_points[i], offset, indoor)
+        else:
+            n_pixels = int(halfvres - offset/2)
+            ns = halfvres/((halfvres - offset/2 +0.1-np.linspace(0, halfvres- offset/2, n_pixels)))# depth
+            
+            for i in range(hres):
 
+                rot_i = rot + math.radians(i*mod*2 - fov*0.5)
+                sin, cos, cos2 = np.sin(rot_i), np.cos(rot_i), np.cos(math.radians(i*mod*2 - fov*0.5))
+                xs, ys = x_pos+ns*cos/cos2, y_pos+ns*sin/cos2
+                xxs, yys = (xs%1*99).astype('int'), (ys%1*99).astype('int')
+                frame[i][2*halfvres-n_pixels:2*halfvres] = floor[np.flip(xxs),np.flip(yys)]
+
+            surf = pg.surfarray.make_surface(frame)
+            screen.blit(pg.transform.scale2x(surf), (0,0))
+            sub_sky = pg.Surface.subsurface(sky, (math.degrees(rot%(2*math.pi)*screen_size[0]/fov), screen_size[1]-offset, screen_size[0], screen_size[1]*0.5+offset))
+            screen.blit(sub_sky, (0, 0))
         raycast_walls(screen, mod, fov, mapa, x_pos, y_pos, rot, offset, wall)
         draw_sprite(screen, x_pos, y_pos, rot, fov, mapa, robot_pos, robot, offset)
         
@@ -99,7 +126,7 @@ def movement(x_pos, y_pos, rot, rot_v, mapa, elapsed_time):
             rot = rot + min(max((p_mouse[0])/200, -0.2), .2)
         if abs(p_mouse[1]) > 1:
             rot_v = rot_v - min(max((p_mouse[1])/200, -0.2), .2)
-            rot_v = min(1, max(-1, rot_v))
+            rot_v = min(0.5, max(-0.5, rot_v))
     
     size = len(mapa)
     pressed_keys = pg.key.get_pressed()
@@ -207,7 +234,7 @@ def raycast_walls(screen, mod, fov, mapa, x_pos, y_pos, rot, offset, wall):
         if found_wall:
             scale = vertical_res*(min(4, (1/(dist*math.cos(math.radians(i*mod-fov*0.5))))))
             text_coord = x%1
-            if text_coord < 0.05 or text_coord > 0.95:
+            if text_coord < 0.001 or text_coord > 0.999:
                 text_coord = y%1
 
             subsurface = pg.Surface.subsurface(wall, (int(100*text_coord), 0, 1, 99))
