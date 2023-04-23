@@ -2,13 +2,14 @@ def read_map(image):
 
     color_map = {
         #### any color not in the dict -> floor block
-        (  0,   0,   0): 1,  # black -> wall block
+        (  0,   0,   0): 4,  # black -> wall block
+        (127, 127, 127): 5,  # black -> wall block
+        (195, 195, 195): 3, # light gray -> castle block
         # (255, 201,  14): 2,  # gold -> mistery block
         # (136,   0,  21): 3,  # dark red -> brick block
         # (255, 127,  39): 4,  # orange -> block block
         # (181, 230,  29): 5,  # light green -> base pipe block, 6 for top,10 top face
         # (  0, 255,   0): 10,  # pure green -> horizontal pipe block
-        # (127, 127, 127): 7, # gray -> door block
         # (195, 195, 195): 8, # light gray -> castle block
         
         # (255, 255, 255):-1, # white -> cloud block
@@ -42,6 +43,8 @@ def read_map(image):
             map_data[x].append(block_type)
             entity_type = entity_map.get((pixel_color.r, pixel_color.g, pixel_color.b), -1)
             if entity_type >= 0:
-                entity_data.append([entity_type, x + 0.5, y+0.5, 0, 0, x%2])
+                entity_data.append([entity_type, x + 0.5, y+0.5, 0, 0, x%2])# type, x, y, direction, distance, status
+                if entity_type == 1:
+                    map_data[x][-1] = -1
     
     return map_data, entity_data
