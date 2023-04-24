@@ -43,7 +43,7 @@ def read_map(image):
             map_data[x].append(block_type)
             entity_type = entity_map.get((pixel_color.r, pixel_color.g, pixel_color.b), -1)
             if entity_type >= 0:
-                entity_data.append([entity_type, x + 0.5, y+0.5, 0, 0, x%2])# type, x, y, direction, distance, status
+                entity_data.append([entity_type, x + 0.5, y+0.5, 0, 0, x%2, 0, 5])# type, x, y, direction, distance, status, cooldown, health
                 if entity_type == 1:
                     map_data[x][-1] = -1
     

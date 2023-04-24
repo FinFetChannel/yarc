@@ -51,7 +51,8 @@ async def main():
     tree = pg.image.load('sprites/tree.png').convert()
     tree.set_colorkey((255,255,255))
 
-    shots_fired = []
+    player_shots = []
+    enemy_shots = []
     light_points = []
     floor_points = []
     subpoints = 1
@@ -74,6 +75,7 @@ async def main():
     vertical_pos = 0
     vertical_vel = 0
     graphics_low = 0
+    health = 20
     indoor = 1
     bullet_time = 0
     total_time = 0
@@ -86,7 +88,7 @@ async def main():
             if event.type == pg.QUIT or (event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE):
                 running = 0
             if event.type == pg.MOUSEBUTTONDOWN:
-                shots_fired.append([0.4, x_pos+0.5*math.cos(rot), y_pos+0.5*math.sin(rot), rot, rot_v])
+                player_shots.append([0.4, x_pos+0.5*math.cos(rot), y_pos+0.5*math.sin(rot), rot, rot_v])
             if event.type == pg.KEYDOWN:
                 if event.key == pg.K_SPACE and vertical_pos == 0:
                     vertical_vel = 3
@@ -128,26 +130,56 @@ async def main():
 
         raycast_walls(screen, mod, FOV, mapa, x_pos, y_pos, rot, offset, textures)
 
-        for i, entity in enumerate(entity_data):
-            if entity[0] in [0] and entity[5]:
-                move_entity(entity, 0.5, mapa, elapsed_time)
+        for i, entity in enumerate(entity_data): # type, x, y, direction, distance, status, cooldown
+            if entity[0] in [0]:
+                if entity[5]:
+                    move_entity(entity, 0.5, mapa, elapsed_time)
+                elif entity[0] == 0:
+                    in_FOV, angle, angle2, angle2degree = vision(entity[1], entity[2], entity[3], FOV, [x_pos, y_pos])
+                    entity[3] =  angle + random.uniform(-0.1, 0.1)
+                    if in_FOV and total_time - entity[6] > 0:
+                        entity[6] = total_time + .5
+                        enemy_shots.append([0.38, entity[1]+0.1*math.cos(entity[3]), entity[2]+0.1*math.sin(entity[3]), entity[3], 0.1])
+                        
+            
             draw_sprite(screen, x_pos, y_pos, rot, FOV, mapa, entity, sprites, offset, animation_time)
-            if i > 0 and entity[4] > entity_data[i-1][4]:
+            
+            if entity[7] <= 0:
+                entity_data.remove(entity)
+            elif i > 0 and entity[4] > entity_data[i-1][4]:
                 entity_data[i-1], entity_data[i] = entity_data[i], entity_data[i-1]
-        
-        for shot in shots_fired:
+
+        for shot in player_shots:
             shot[0] += math.sin(shot[4])*elapsed_time*3  
-            if move_entity(shot, 10, mapa, elapsed_time) or shot[0]<0:
+            if move_entity(shot, 5, mapa, elapsed_time) or shot[0]<0 or collision_entities(shot, entity_data):
                 draw_point(screen, x_pos, y_pos, rot, FOV, shot[1:3], offset, shot[0], (255,255,255), 10)
-                shots_fired.remove(shot)
+                player_shots.remove(shot)
             else:
-                draw_point(screen, x_pos, y_pos, rot, FOV, shot[1:3], offset, shot[0], (255,225,225), 3)
+                draw_point(screen, x_pos, y_pos, rot, FOV, shot[1:3], offset, shot[0], (55,255,255), 3)
+        
+        for shot in enemy_shots:
+            shot[0] += math.sin(shot[4])*elapsed_time*3
+            dist2player = math.sqrt((x_pos-shot[1])**2+(y_pos-shot[1])**2)
+            if move_entity(shot, 5, mapa, elapsed_time) or shot[0] < 0 or dist2player < 0.1:
+                draw_point(screen, x_pos, y_pos, rot, FOV, shot[1:3], offset, shot[0], (255,255,255), 10)
+                enemy_shots.remove(shot)
+                health -= dist2player < 0.1
+                print(health)
+            else:
+                draw_point(screen, x_pos, y_pos, rot, FOV, shot[1:3], offset, shot[0], (255,55,55), 3)
             
 
         screen.blit(font.render(str(fps), 1, [255, 255, 255]), [5,5])
         pg.display.update()
 
         await asyncio.sleep(0)  # very important, and keep it 0
+
+def collision_entities(shot, entity_data):
+    for entity in entity_data:
+        if math.sqrt((shot[1]-entity[1])**2 + (shot[2]-entity[2])**2) < 0.1:
+            entity[7] -= 1
+            return 1
+    return 0
 
 def movement(x_pos, y_pos, rot, rot_v, mapa, elapsed_time, p_mouse_target):
     
